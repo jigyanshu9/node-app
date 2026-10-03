@@ -1,69 +1,99 @@
-\```groovy
 pipeline {
-
     agent any
 
     environment {
-        IMAGE_NAME = "node-app"
-        CONTAINER_NAME = "node-app-container"
-        PORT = "3000"
+        IMAGE_NAME     = 'node-app'
+        IMAGE_TAG      = "${BUILD_NUMBER}"
+        CONTAINER_NAME = 'node-app'
+        HOST_PORT      = '3000'   // port you open in the browser
+        APP_PORT       = '3000'   // port your app.js listens on inside the container
+
+        // Set to 'true' after you add the 'dockerhub-creds' credential in Jenkins
+        PUSH_TO_DOCKERHUB = 'false'
+        DOCKERHUB_USER    = 'your-dockerhub-username'
+    }
+
+    options {
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 15, unit: 'MINUTES')
     }
 
     triggers {
-        pollSCM('H/1 * * * *')
+        // Fallback: check GitHub for new commits every ~5 minutes
+        pollSCM('H/5 * * * *')
     }
 
     stages {
-
         stage('Checkout') {
             steps {
-                echo 'Checking out source code...'
                 checkout scm
+                sh 'ls -la'
             }
         }
 
-        stage('Install Dependencies') {
+        stage('Build') {
             steps {
-                echo 'Installing Node.js dependencies...'
-                bat 'npm install'
+                sh 'docker build -t ${IMAGE_NAME}:${IMAGE_TAG} -t ${IMAGE_NAME}:latest .'
             }
         }
 
         stage('Test') {
             steps {
-                echo 'Running tests...'
-                bat 'npm test'
+                // Runs "npm test" inside the image; skipped quietly if no test script exists
+                sh 'docker run --rm ${IMAGE_NAME}:${IMAGE_TAG} npm test --if-present'
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Push Image') {
+            when {
+                expression { env.PUSH_TO_DOCKERHUB == 'true' }
+            }
             steps {
-                echo 'Building Docker image...'
-                bat 'docker build -t %IMAGE_NAME%:%BUILD_NUMBER% .'
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds',
+                                                  usernameVariable: 'DH_USER',
+                                                  passwordVariable: 'DH_PASS')]) {
+                    sh '''
+                        echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
+                        docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${DOCKERHUB_USER}/${IMAGE_NAME}:${IMAGE_TAG}
+                        docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${DOCKERHUB_USER}/${IMAGE_NAME}:latest
+                        docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:${IMAGE_TAG}
+                        docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:latest
+                        docker logout
+                    '''
+                }
             }
         }
 
         stage('Deploy') {
             steps {
-                echo 'Stopping existing container...'
-                bat 'docker rm -f %CONTAINER_NAME% 2>NUL || exit /b 0'
-
-                echo 'Starting new container...'
-                bat 'docker run -d --name %CONTAINER_NAME% -p %PORT%:%PORT% %IMAGE_NAME%:%BUILD_NUMBER%'
+                sh '''
+                    docker rm -f ${CONTAINER_NAME} || true
+                    docker run -d --name ${CONTAINER_NAME} \
+                        --restart unless-stopped \
+                        -p ${HOST_PORT}:${APP_PORT} \
+                        ${IMAGE_NAME}:${IMAGE_TAG}
+                '''
             }
         }
 
+        stage('Smoke Check') {
+            steps {
+                sh '''
+                    sleep 5
+                    curl -fsS http://localhost:${HOST_PORT}/ > /dev/null
+                '''
+            }
+        }
     }
 
     post {
         success {
-            echo 'Pipeline completed successfully!'
-            echo 'Node.js application is running at http://localhost:3000'
+            echo "Deployed ${IMAGE_NAME}:${IMAGE_TAG}. Open http://<ec2-public-ip>:${HOST_PORT}"
         }
-
         failure {
-            echo 'Pipeline failed. Check the console output.'
+            echo 'Pipeline failed. Check the stage logs above.'
+            sh 'docker logs ${CONTAINER_NAME} || true'
         }
     }
 }
-```
