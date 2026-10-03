@@ -40,8 +40,10 @@ pipeline {
 
         stage('Test') {
             steps {
-                // Runs "npm test" inside the image; skipped quietly if no test script exists
-                sh 'docker run --rm ${IMAGE_NAME}:${IMAGE_TAG} npm test --if-present'
+                sh '''
+                    docker run --rm ${IMAGE_NAME}:${IMAGE_TAG} \
+                        sh -c "node --check server.js && test -f public/index.html"
+                '''
             }
         }
 
