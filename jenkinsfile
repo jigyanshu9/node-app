@@ -1,0 +1,69 @@
+\```groovy
+pipeline {
+
+    agent any
+
+    environment {
+        IMAGE_NAME = "node-app"
+        CONTAINER_NAME = "node-app-container"
+        PORT = "3000"
+    }
+
+    triggers {
+        pollSCM('H/1 * * * *')
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                echo 'Checking out source code...'
+                checkout scm
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                echo 'Installing Node.js dependencies...'
+                bat 'npm install'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo 'Running tests...'
+                bat 'npm test'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo 'Building Docker image...'
+                bat 'docker build -t %IMAGE_NAME%:%BUILD_NUMBER% .'
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo 'Stopping existing container...'
+                bat 'docker rm -f %CONTAINER_NAME% 2>NUL || exit /b 0'
+
+                echo 'Starting new container...'
+                bat 'docker run -d --name %CONTAINER_NAME% -p %PORT%:%PORT% %IMAGE_NAME%:%BUILD_NUMBER%'
+            }
+        }
+
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+            echo 'Node.js application is running at http://localhost:3000'
+        }
+
+        failure {
+            echo 'Pipeline failed. Check the console output.'
+        }
+    }
+}
+```
