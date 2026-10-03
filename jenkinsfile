@@ -9,7 +9,7 @@ pipeline {
         APP_PORT       = '3000'
 
         // CHANGE THIS to your real Docker Hub username
-        DOCKERHUB_USER = 'jigynashu9'
+        DOCKERHUB_USER = ''
     }
 
     options {
@@ -97,5 +97,3 @@ pipeline {
         }
     }
 }
-
-
