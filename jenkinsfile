@@ -5,30 +5,31 @@ pipeline {
         IMAGE_NAME     = 'node-app'
         IMAGE_TAG      = "${BUILD_NUMBER}"
         CONTAINER_NAME = 'node-app'
-        HOST_PORT      = '3000'   // port you open in the browser
-        APP_PORT       = '3000'   // port your app.js listens on inside the container
+        HOST_PORT      = '3000'
+        APP_PORT       = '3000'
 
-        // Set to 'true' after you add the 'dockerhub-creds' credential in Jenkins
-        PUSH_TO_DOCKERHUB = 'false'
-        DOCKERHUB_USER    = 'your-dockerhub-username'
+        // CHANGE THIS to your real Docker Hub username
+        DOCKERHUB_USER = 'jigynashu9'
     }
 
     options {
         timestamps()
+        disableConcurrentBuilds()   // two quick commits won't fight over the same container/port
         buildDiscarder(logRotator(numToKeepStr: '10'))
         timeout(time: 15, unit: 'MINUTES')
     }
 
     triggers {
-        // Fallback: check GitHub for new commits every ~5 minutes
-        pollSCM('H/5 * * * *')
+        // 1) Instant trigger when GitHub sends a push webhook
+        githubPush()
+        // 2) Safety net: if the webhook ever fails, Jenkins still notices new commits within ~2 minutes
+        pollSCM('H/2 * * * *')
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
-                sh 'ls -la'
             }
         }
 
@@ -48,9 +49,6 @@ pipeline {
         }
 
         stage('Push Image') {
-            when {
-                expression { env.PUSH_TO_DOCKERHUB == 'true' }
-            }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-creds',
                                                   usernameVariable: 'DH_USER',
@@ -91,7 +89,7 @@ pipeline {
 
     post {
         success {
-            echo "Deployed ${IMAGE_NAME}:${IMAGE_TAG}. Open http://<ec2-public-ip>:${HOST_PORT}"
+            echo "Pushed ${DOCKERHUB_USER}/${IMAGE_NAME}:${IMAGE_TAG} and deployed. Open http://<ec2-public-ip>:${HOST_PORT}"
         }
         failure {
             echo 'Pipeline failed. Check the stage logs above.'
